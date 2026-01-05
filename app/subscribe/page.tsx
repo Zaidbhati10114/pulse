@@ -9,8 +9,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { useSubscribe } from "../features/subscription/hooks/useSubscribe";
 
-import { v4 as uuidv4 } from "uuid";
+//import { v4 as uuidv4 } from "uuid";
 import { useSubscriptionStore } from "@/lib/zustand/store/susbcriptionStore";
+import { router } from "../server/trpc/trpc";
 
 export default function Subscribe() {
   // ✅ Initialize with pendingEmail
@@ -79,7 +80,6 @@ export default function Subscribe() {
       {
         email,
         preferences,
-        id: uuidv4(),
       },
       {
         // On success callback
