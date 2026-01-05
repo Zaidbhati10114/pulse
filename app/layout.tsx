@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
-import {  Plus_Jakarta_Sans } from "next/font/google";
+import { Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/lib/react-query/providers";
 import { TRPCProvider } from "@/lib/trpc/Provider";
+import Header from "./components/Header";
+import Footer from "./components/Footer";
+import { Toaster } from "@/components/ui/sonner";
 
 const plusJakartaSans = Plus_Jakarta_Sans({
   subsets: ["latin"],
@@ -22,14 +25,13 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body
-        className={`${plusJakartaSans.variable} antialiased`}
-      >
-       <TRPCProvider>
-         <Providers>
-          {children}
-        </Providers>
-       </TRPCProvider>
+      <body className={`${plusJakartaSans.variable} antialiased`}>
+        <Toaster />
+        <Header />
+        <TRPCProvider>
+          <Providers>{children}</Providers>
+        </TRPCProvider>
+        <Footer />
       </body>
     </html>
   );
