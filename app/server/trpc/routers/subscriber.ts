@@ -1,280 +1,80 @@
 import { z } from 'zod';
 import { router, publicProcedure } from '../trpc';
-import { v4 as uuidv4 } from 'uuid';
-
 import crypto from 'crypto';
+import { ObjectId } from 'mongodb';
 import { subscribeSchema, toggleSubscriptionSchema, unsubscribeSchema, updatePreferencesSchema } from '@/app/features/subscription/lib/validations/subscriber';
 
-// Helper function to generate unsubscribe token
+
+
 function generateUnsubscribeToken(): string {
     return crypto.randomBytes(32).toString('hex');
 }
 
 export const subscriberRouter = router({
-    // Subscribe to newsletter
+    // ============================================
+    // SUBSCRIBE
+    // ============================================
     subscribe: publicProcedure
         .input(subscribeSchema)
         .mutation(async ({ ctx, input }) => {
             const { email, preferences } = input;
 
-            // Check if subscriber already exists
-            const existingSubscriber = await ctx.db
+            const existing = await ctx.db
                 .collection('subscribers')
                 .findOne({ email });
 
-            if (existingSubscriber) {
-                // If already subscribed and active
-                if (existingSubscriber.status === 'active') {
-                    return {
-                        success: false,
-                        message: 'You are already subscribed to our newsletter!',
-                        alreadySubscribed: true,
-                    };
-                }
+            // Already active
+            if (existing?.status === 'active') {
+                return {
+                    success: true,
+                    message: 'Already subscribed',
+                    id: existing._id.toString(),
+                };
+            }
 
-                // If previously unsubscribed or paused, reactivate
-                const result = await ctx.db.collection('subscribers').updateOne(
+            // Reactivate paused / unsubscribed
+            if (existing) {
+                await ctx.db.collection('subscribers').updateOne(
                     { email },
                     {
                         $set: {
                             preferences,
                             status: 'active',
-                            updatedAt: new Date(),
                         },
                     }
                 );
 
                 return {
                     success: true,
-                    message: 'Welcome back! Your subscription has been reactivated.',
-                    data: {
-                        email,
-                        preferences,
-                        status: 'active',
-                    },
+                    message: 'Subscription reactivated',
+                    id: existing._id.toString(),
                 };
             }
 
             // Create new subscriber
-            const unsubscribeToken = generateUnsubscribeToken();
-
-            const newSubscriber = {
-                id: uuidv4(),
+            const result = await ctx.db.collection('subscribers').insertOne({
                 email,
                 preferences,
-                status: 'active' as const,
-                unsubscribeToken,
+                status: 'active',
+                unsubscribeToken: crypto.randomBytes(32).toString('hex'),
                 subscribedAt: new Date(),
-                updatedAt: new Date(),
-            };
-
-            await ctx.db.collection('subscribers').insertOne(newSubscriber);
-
-            return {
-                success: true,
-                message: 'Successfully subscribed! You will receive newsletters based on your preferences.',
-                data: {
-                    id: newSubscriber.id,
-                    email: newSubscriber.email,
-                    preferences: newSubscriber.preferences,
-                    status: newSubscriber.status,
-                    subscribedAt: newSubscriber.subscribedAt,
-                },
-            };
-        }),
-
-    // Get subscriber by ID
-    // Get subscriber by ID
-    getSubscriberById: publicProcedure
-        .input(z.object({ id: z.string().min(1) }))
-        .query(async ({ ctx, input }) => {
-            const subscriber = await ctx.db
-                .collection('subscribers')
-                .findOne({ id: input.id });
-
-            if (!subscriber) {
-                return {
-                    success: false,
-                    message: 'Subscriber not found.',
-                    data: null,
-                };
-            }
+                timezone: 'Asia/Kolkata',
+                emailFrequency: 'daily',
+                totalEmailsSent: 0,
+                totalEmailsOpened: 0,
+                lastOpenedAt: null,
+            });
 
             return {
                 success: true,
-                data: {
-                    id: subscriber.id,
-                    email: subscriber.email,
-                    preferences: subscriber.preferences,
-                    status: subscriber.status,
-                    subscribedAt: subscriber.subscribedAt,
-                    updatedAt: subscriber.updatedAt,
-                },
+                message: 'Successfully subscribed',
+                id: result.insertedId.toString(), // 🔑 THIS IS THE KEY
             };
         }),
 
-    // Update preferences
-    updatePreferences: publicProcedure
-        .input(updatePreferencesSchema)
-        .mutation(async ({ ctx, input }) => {
-            const { email, preferences } = input;
-
-            const subscriber = await ctx.db
-                .collection('subscribers')
-                .findOne({ email });
-
-            if (!subscriber) {
-                return {
-                    success: false,
-                    message: 'Subscriber not found. Please subscribe first.',
-                };
-            }
-
-            await ctx.db.collection('subscribers').updateOne(
-                { email },
-                {
-                    $set: {
-                        preferences,
-                        updatedAt: new Date(),
-                    },
-                }
-            );
-
-            return {
-                success: true,
-                message: 'Your preferences have been updated successfully!',
-                data: {
-                    email,
-                    preferences,
-                },
-            };
-        }),
-
-    // Unsubscribe
-    unsubscribe: publicProcedure
-        .input(unsubscribeSchema)
-        .mutation(async ({ ctx, input }) => {
-            const { token } = input;
-
-            const subscriber = await ctx.db
-                .collection('subscribers')
-                .findOne({ unsubscribeToken: token });
-
-            if (!subscriber) {
-                return {
-                    success: false,
-                    message: 'Invalid unsubscribe token.',
-                };
-            }
-
-            await ctx.db.collection('subscribers').updateOne(
-                { unsubscribeToken: token },
-                {
-                    $set: {
-                        status: 'unsubscribed',
-                        updatedAt: new Date(),
-                    },
-                }
-            );
-
-            return {
-                success: true,
-                message: 'You have been unsubscribed successfully. We are sorry to see you go!',
-                data: {
-                    email: subscriber.email,
-                },
-            };
-        }),
-
-    // Pause subscription
-    pauseSubscription: publicProcedure
-        .input(toggleSubscriptionSchema)
-        .mutation(async ({ ctx, input }) => {
-            const { email } = input;
-
-            const subscriber = await ctx.db
-                .collection('subscribers')
-                .findOne({ email });
-
-            if (!subscriber) {
-                return {
-                    success: false,
-                    message: 'Subscriber not found.',
-                };
-            }
-
-            if (subscriber.status === 'unsubscribed') {
-                return {
-                    success: false,
-                    message: 'Cannot pause an unsubscribed account. Please subscribe again.',
-                };
-            }
-
-            await ctx.db.collection('subscribers').updateOne(
-                { email },
-                {
-                    $set: {
-                        status: 'paused',
-                        updatedAt: new Date(),
-                    },
-                }
-            );
-
-            return {
-                success: true,
-                message: 'Your subscription has been paused. You can resume anytime!',
-                data: {
-                    email,
-                    status: 'paused',
-                },
-            };
-        }),
-
-    // Resume subscription
-    resumeSubscription: publicProcedure
-        .input(toggleSubscriptionSchema)
-        .mutation(async ({ ctx, input }) => {
-            const { email } = input;
-
-            const subscriber = await ctx.db
-                .collection('subscribers')
-                .findOne({ email });
-
-            if (!subscriber) {
-                return {
-                    success: false,
-                    message: 'Subscriber not found.',
-                };
-            }
-
-            if (subscriber.status !== 'paused') {
-                return {
-                    success: false,
-                    message: 'Subscription is not paused.',
-                };
-            }
-
-            await ctx.db.collection('subscribers').updateOne(
-                { email },
-                {
-                    $set: {
-                        status: 'active',
-                        updatedAt: new Date(),
-                    },
-                }
-            );
-
-            return {
-                success: true,
-                message: 'Your subscription has been resumed!',
-                data: {
-                    email,
-                    status: 'active',
-                },
-            };
-        }),
-
-    // Get subscriber details
+    // ============================================
+    // GET SUBSCRIBER (BY EMAIL)
+    // ============================================
     getSubscriber: publicProcedure
         .input(z.object({ email: z.string().email() }))
         .query(async ({ ctx, input }) => {
@@ -283,11 +83,7 @@ export const subscriberRouter = router({
                 .findOne({ email: input.email });
 
             if (!subscriber) {
-                return {
-                    success: false,
-                    message: 'Subscriber not found.',
-                    data: null,
-                };
+                return { success: false, message: 'Subscriber not found.' };
             }
 
             return {
@@ -297,12 +93,150 @@ export const subscriberRouter = router({
                     preferences: subscriber.preferences,
                     status: subscriber.status,
                     subscribedAt: subscriber.subscribedAt,
-                    updatedAt: subscriber.updatedAt,
+                    lastEmailSent: subscriber.lastEmailSent,
+                    timezone: subscriber.timezone,
+                    emailFrequency: subscriber.emailFrequency,
+                    totalEmailsSent: subscriber.totalEmailsSent,
+                    totalEmailsOpened: subscriber.totalEmailsOpened,
                 },
             };
         }),
 
-    // Get all subscribers (for admin - add auth later)
+    // ===========GET SUBSCRIBER BY ID ===========
+    getSubscriberById: publicProcedure
+        .input(z.object({ id: z.string().min(1) }))
+        .query(async ({ ctx, input }) => {
+            const subscriber = await ctx.db
+                .collection('subscribers')
+                .findOne({ _id: new ObjectId(input.id) });
+
+            if (!subscriber) {
+                return {
+                    success: false,
+                    message: 'Subscriber not found',
+                    data: null,
+                };
+            }
+
+            return {
+                success: true,
+                data: {
+                    id: subscriber._id.toString(),
+                    email: subscriber.email,
+                    preferences: subscriber.preferences,
+                    status: subscriber.status,
+                    subscribedAt: subscriber.subscribedAt,
+                },
+            };
+        }),
+
+    // ============================================
+    // UPDATE PREFERENCES
+    // ============================================
+    updatePreferences: publicProcedure
+        .input(updatePreferencesSchema)
+        .mutation(async ({ ctx, input }) => {
+            const { email, preferences } = input;
+
+            const result = await ctx.db.collection('subscribers').updateOne(
+                { email, status: { $ne: 'unsubscribed' } },
+                { $set: { preferences } }
+            );
+
+            if (result.matchedCount === 0) {
+                return {
+                    success: false,
+                    message: 'Subscriber not found or unsubscribed.',
+                };
+            }
+
+            return {
+                success: true,
+                message: 'Preferences updated successfully.',
+            };
+        }),
+
+    // ============================================
+    // UNSUBSCRIBE
+    // ============================================
+    unsubscribe: publicProcedure
+        .input(unsubscribeSchema)
+        .mutation(async ({ ctx, input }) => {
+            const { token } = input;
+
+            const result = await ctx.db.collection('subscribers').updateOne(
+                { unsubscribeToken: token },
+                { $set: { status: 'unsubscribed' } }
+            );
+
+            if (result.matchedCount === 0) {
+                return {
+                    success: false,
+                    message: 'Invalid unsubscribe token.',
+                };
+            }
+
+            return {
+                success: true,
+                message: 'You have been unsubscribed successfully.',
+            };
+        }),
+
+    // ============================================
+    // PAUSE
+    // ============================================
+    pauseSubscription: publicProcedure
+        .input(toggleSubscriptionSchema)
+        .mutation(async ({ ctx, input }) => {
+            const { email } = input;
+
+            const result = await ctx.db.collection('subscribers').updateOne(
+                { email, status: 'active' },
+                { $set: { status: 'paused' } }
+            );
+
+            if (result.matchedCount === 0) {
+                return {
+                    success: false,
+                    message: 'Subscriber not active or not found.',
+                };
+            }
+
+            return {
+                success: true,
+                message: 'Subscription paused.',
+            };
+        }),
+
+    // ============================================
+    // RESUME
+    // ============================================
+    resumeSubscription: publicProcedure
+        .input(toggleSubscriptionSchema)
+        .mutation(async ({ ctx, input }) => {
+            const { email } = input;
+
+            const result = await ctx.db.collection('subscribers').updateOne(
+                { email, status: 'paused' },
+                { $set: { status: 'active' } }
+            );
+
+            if (result.matchedCount === 0) {
+                return {
+                    success: false,
+                    message: 'Subscription is not paused or does not exist.',
+                };
+            }
+
+            return {
+                success: true,
+                message: 'Subscription resumed.',
+            };
+        }),
+
+    // ============================================
+    // LIST SUBSCRIBERS (ADMIN / INTERNAL)
+    // ============================================
     getAllSubscribers: publicProcedure
         .input(
             z.object({
@@ -316,7 +250,7 @@ export const subscriberRouter = router({
 
             const filter = status ? { status } : {};
 
-            const [subscribers, total] = await Promise.all([
+            const [items, total] = await Promise.all([
                 ctx.db
                     .collection('subscribers')
                     .find(filter)
@@ -329,12 +263,12 @@ export const subscriberRouter = router({
 
             return {
                 success: true,
-                data: subscribers.map((sub) => ({
-                    email: sub.email,
-                    preferences: sub.preferences,
-                    status: sub.status,
-                    subscribedAt: sub.subscribedAt,
-                    updatedAt: sub.updatedAt,
+                data: items.map((s) => ({
+                    email: s.email,
+                    status: s.status,
+                    preferences: s.preferences,
+                    subscribedAt: s.subscribedAt,
+                    lastEmailSent: s.lastEmailSent,
                 })),
                 pagination: {
                     total,

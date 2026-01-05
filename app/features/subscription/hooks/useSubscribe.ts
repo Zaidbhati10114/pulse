@@ -4,41 +4,45 @@ import { toast } from '@/hooks/use-toast';
 
 export const useSubscribe = () => {
     const router = useRouter();
-    const utils = trpc.useUtils()
+    const utils = trpc.useUtils();
 
-    // Subscribe mutation
     const subscribeMutation = trpc.subscriber.subscribe.useMutation({
         onSuccess: (data) => {
-            if (data.success && data.data) {
-                router.push(`/subscribe/${data.data.id}/confirmation`);
+            if (data.success) {
+                toast({
+                    title: 'Subscribed 🎉',
+                    description: data.message,
+                });
+
+                // ✅ ID-agnostic confirmation route
+                router.push(`/subscribe/${data.id}/confirmation`);
             } else {
                 toast({
-                    title: data.alreadySubscribed
-                        ? 'Already Subscribed'
-                        : 'Subscription Failed',
+                    title: 'Subscription Failed',
                     description: data.message,
-                    variant: data.alreadySubscribed ? 'default' : 'destructive',
+                    variant: 'destructive',
                 });
             }
         },
+
         onError: (error) => {
             toast({
                 title: 'Error',
-                description: error.message || 'Failed to subscribe. Please try again.',
+                description:
+                    error.message || 'Failed to subscribe. Please try again.',
                 variant: 'destructive',
             });
         },
     });
 
-    // ✅ Correct: create mutation hook ONCE
-    // const getSubscriberMutation =
-    //     trpc.subscriber.getSubscriber.useMutation();
-
-    // ✅ Safe function you can call anytime
+    /**
+     * Check if an email already exists
+     * (used for pre-submit UX)
+     */
     const checkEmail = async (email: string) => {
         try {
-            const result = await utils.subscriber.getSubscriber.fetch({ email })
-            return result
+            const result = await utils.subscriber.getSubscriber.fetch({ email });
+            return result;
         } catch (error) {
             console.error('Error checking email:', error);
             return {
@@ -49,9 +53,27 @@ export const useSubscribe = () => {
         }
     };
 
+
+    const getSubscriberById = async (id: string) => {
+        try {
+            const result =
+                await utils.subscriber.getSubscriberById.fetch({ id });
+
+            return result;
+        } catch (error) {
+            console.error('Error fetching subscriber by id:', error);
+            return {
+                success: false,
+                message: 'Error fetching subscriber',
+                data: null,
+            };
+        }
+    };
+
     return {
         subscribe: subscribeMutation.mutate,
         checkEmail,
+        getSubscriberById,
 
         isLoading: subscribeMutation.isPending,
         isError: subscribeMutation.isError,
